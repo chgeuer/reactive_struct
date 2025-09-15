@@ -24,10 +24,24 @@ end
 
 ## Usage
 
-1. `use ReactiveStruct` in your module
+1. `use ReactiveStruct` in your module (optionally with configuration)
 2. Define your struct with `defstruct`
 3. Define computed fields with `computed/3` macro
 4. Create instances with `new/1` and modify with `update/2`
+
+### Configuration Options
+
+ReactiveStruct supports the following options when using the macro:
+
+- `allow_updating_computed_fields` (default: `false`) - Controls whether computed fields can be directly updated
+
+```elixir
+# Default behavior - computed fields cannot be updated directly
+use ReactiveStruct
+
+# Allow updating computed fields (breaks dependency graph)
+use ReactiveStruct, allow_updating_computed_fields: true
+```
 
 ## Basic Example
 
@@ -110,6 +124,43 @@ updated = Chain.update(chain, :base, 5)
 updated.final  # 400
 ```
 
+## Field Update Restrictions
+
+By default, ReactiveStruct prevents direct updates to computed fields to maintain dependency graph integrity:
+
+```elixir
+defmodule Calculator do
+  use ReactiveStruct
+  defstruct [:a, :b, :sum]
+
+  computed(:sum, deps: [:a, :b], do: a + b)
+end
+
+calc = Calculator.new(a: 1, b: 2)
+
+# ✓ This works - updating input fields
+Calculator.update(calc, :a, 10)
+
+# ✗ This raises ArgumentError - updating computed field
+Calculator.update(calc, :sum, 100)
+```
+
+To allow updating computed fields (which may break dependency consistency):
+
+```elixir
+defmodule FlexibleCalculator do
+  use ReactiveStruct, allow_updating_computed_fields: true
+  defstruct [:a, :b, :sum]
+
+  computed(:sum, deps: [:a, :b], do: a + b)
+end
+
+calc = FlexibleCalculator.new(a: 1, b: 2)
+
+# ✓ This now works - computed field can be updated directly
+FlexibleCalculator.update(calc, :sum, 100)
+```
+
 ## API Functions
 
 ReactiveStruct generates these functions:
@@ -169,10 +220,11 @@ flowchart TD
 
 ## Error Handling
 
-ReactiveStruct validates dependencies at compile time:
+ReactiveStruct validates dependencies at compile time and runtime:
 
 - **Circular dependencies**: Compilation error
 - **Non-existent fields**: Compilation error
+- **Computed field updates**: Runtime ArgumentError (unless explicitly allowed)
 - **Runtime exceptions**: Propagated from computation functions
 - **Nil dependencies**: Handle in computation logic as needed
 
