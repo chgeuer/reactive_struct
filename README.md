@@ -51,6 +51,8 @@ Calculator.new(a0: 2, b: 3)
 |> IO.inspect(label: :b)    # %Calculator{a0: 5, a: 6, b: 3, sum: 9, product: 18}
 ```
 
+Calling `Kino.Mermaid.new(Calculator.mermaid())` results in this little diagram (in Elixir LiveBook):
+
 ```mermaid
 flowchart TD
     %% Input fields
