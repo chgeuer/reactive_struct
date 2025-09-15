@@ -51,4 +51,6 @@ end
 
 chain = %{final: 256} = Chain.new(base: 3)
 chain = %{final: 400} = Chain.update(chain, base: 5)
+
+Kino.Mermaid.new(Chain.mermaid())
 ```
