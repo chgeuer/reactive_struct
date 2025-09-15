@@ -51,7 +51,7 @@ Calculator.new(a0: 2, b: 3)
 |> IO.inspect(label: :b)    # %Calculator{a0: 5, a: 6, b: 3, sum: 9, product: 18}
 ```
 
-```mermaidjs
+```mermaid
 a: %Calculator{a0: 2, a: 3, b: 3, sum: 6, product: 9}
 b: %Calculator{a0: 5, a: 6, b: 3, sum: 9, product: 18}
 flowchart TD
@@ -147,7 +147,7 @@ Example.mermaid()
 
 results in 
 
-```mermaidjs
+```mermaid
 flowchart TD
     %% Input fields
     A[a]
