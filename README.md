@@ -52,8 +52,6 @@ Calculator.new(a0: 2, b: 3)
 ```
 
 ```mermaid
-a: %Calculator{a0: 2, a: 3, b: 3, sum: 6, product: 9}
-b: %Calculator{a0: 5, a: 6, b: 3, sum: 9, product: 18}
 flowchart TD
     %% Input fields
     A0[a0]
