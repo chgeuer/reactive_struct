@@ -3,8 +3,8 @@
 ```elixir
 Mix.install([
   {:kino, "~> 0.17.0"},
-  {:reactive_struct, github: "chgeuer/reactive_struct"}
-  # {:reactive_struct, path: "/home/chgeuer/src/reactive_struct"}
+  # {:reactive_struct, github: "chgeuer/reactive_struct"}
+  {:reactive_struct, path: "/home/chgeuer/src/reactive_struct"}
 ])
 ```
 
@@ -41,16 +41,18 @@ Calculator.new(a0: 2, b: 3)
 
 ```elixir
 defmodule Chain do
-  use ReactiveStruct
+  use ReactiveStruct, allow_setting_computed_fields: false
+
   defstruct ~w[base step1 step2 final]a
 
-  computed(:final, deps: [:step2], do: step2 * step2)
   computed(:step1, deps: [:base], do: base * 2)
   computed(:step2, deps: [:step1], do: step1 + 10)
+  computed(:final, deps: [:step2], do: step2 * step2)
 end
 
 chain = %{final: 256} = Chain.new(base: 3)
 chain = %{final: 400} = Chain.update(chain, base: 5)
+# Chain.update(chain, step2: 5)
 
 Kino.Mermaid.new(Chain.mermaid())
 ```

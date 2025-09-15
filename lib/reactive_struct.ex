@@ -197,12 +197,15 @@ defmodule ReactiveStruct do
 
   @doc false
   defmacro __using__(opts) do
-    allow_updating_computed_fields = Keyword.get(opts, :allow_updating_computed_fields, false)
+    allow_setting_computed_fields = Keyword.get(opts, :allow_setting_computed_fields, false)
+    # Keep backwards compatibility
+    allow_setting_computed_fields =
+      Keyword.get(opts, :allow_updating_computed_fields, allow_setting_computed_fields)
 
     quote do
-      import ReactiveStruct
+      import ReactiveStruct, only: [computed: 2, computed: 3]
       @reactive_computations []
-      @allow_updating_computed_fields unquote(allow_updating_computed_fields)
+      @allow_setting_computed_fields unquote(allow_setting_computed_fields)
       @before_compile ReactiveStruct
     end
   end
@@ -271,10 +274,21 @@ defmodule ReactiveStruct do
     [
       quote do
         def new(attrs \\ %{}) do
-          attrs
-          |> normalize_attrs()
-          |> then(&struct(__MODULE__, &1))
-          |> recompute_all()
+          normalized_attrs = normalize_attrs(attrs)
+
+          # Validate fields being set during initialization
+          changed_fields = Map.keys(normalized_attrs)
+          validate_field_updates(changed_fields)
+
+          struct = struct(__MODULE__, normalized_attrs)
+
+          # Only recompute fields that weren't explicitly set
+          if @allow_setting_computed_fields do
+            explicitly_set_fields = MapSet.new(Map.keys(normalized_attrs))
+            recompute_missing_computed_fields(struct, explicitly_set_fields)
+          else
+            recompute_all(struct)
+          end
         end
       end,
       quote do
@@ -330,47 +344,21 @@ defmodule ReactiveStruct do
     [
       quote do
         defp normalize_attrs(attrs, opts \\ []) do
-          if opts[:as_list] do
-            normalize_attrs_to_list(attrs)
-          else
-            normalize_attrs_to_map(attrs)
-          end
+          ReactiveStruct.normalize_attrs(attrs, opts)
         end
       end,
       quote do
-        defp normalize_attrs_to_list(attrs) when is_list(attrs), do: attrs
-        defp normalize_attrs_to_list(attrs) when is_map(attrs), do: Map.to_list(attrs)
-      end,
-      quote do
-        defp normalize_attrs_to_map(attrs) when is_list(attrs), do: Enum.into(attrs, %{})
-        defp normalize_attrs_to_map(attrs) when is_map(attrs), do: attrs
-      end,
-      quote do
         defp apply_changes(struct, changes) do
-          Enum.reduce(changes, struct, fn {key, value}, acc ->
-            Map.put(acc, key, value)
-          end)
+          ReactiveStruct.apply_changes(struct, changes)
         end
       end,
       quote do
         defp validate_field_updates(changed_fields) do
-          unless @allow_updating_computed_fields do
-            computed_fields = get_computed_fields(@computations)
-            invalid_fields = Enum.filter(changed_fields, &MapSet.member?(computed_fields, &1))
-
-            if invalid_fields != [] do
-              field_list = invalid_fields |> Enum.map(&":#{&1}") |> Enum.join(", ")
-              raise ArgumentError, "Cannot update computed fields #{field_list}. " <>
-                "Set `allow_updating_computed_fields: true` when using ReactiveStruct to enable this behavior."
-            end
-          end
-        end
-      end,
-      quote do
-        defp get_computed_fields(computations) do
-          computations
-          |> Enum.map(&elem(&1, 0))
-          |> MapSet.new()
+          ReactiveStruct.validate_field_updates(
+            changed_fields,
+            @allow_setting_computed_fields,
+            @computations
+          )
         end
       end
     ]
@@ -380,27 +368,20 @@ defmodule ReactiveStruct do
   def generate_computation_helpers do
     quote do
       defp recompute_all(struct) do
-        computation_order = topological_sort(@computations)
-
-        Enum.reduce(computation_order, struct, fn {field, deps, computation}, acc ->
-          recompute_field(acc, field, deps, computation)
-        end)
+        ReactiveStruct.recompute_all(struct, @computations, __MODULE__)
       end
 
       defp recompute_dependencies(struct, changed_fields) do
-        affected_computations = find_affected_computations(changed_fields, @computations)
-        computation_order = topological_sort(affected_computations)
-
-        Enum.reduce(computation_order, struct, fn {field, deps, computation}, acc ->
-          recompute_field(acc, field, deps, computation)
-        end)
+        ReactiveStruct.recompute_dependencies(struct, changed_fields, @computations, __MODULE__)
       end
 
-      defp recompute_field(struct, field, deps, _computation) do
-        function_name = String.to_atom("__compute_#{field}__")
-        dep_values = Enum.map(deps, &Map.get(struct, &1))
-        result = apply(__MODULE__, function_name, dep_values)
-        Map.put(struct, field, result)
+      defp recompute_missing_computed_fields(struct, explicitly_set_fields) do
+        ReactiveStruct.recompute_missing_computed_fields(
+          struct,
+          explicitly_set_fields,
+          @computations,
+          __MODULE__
+        )
       end
     end
   end
@@ -408,71 +389,170 @@ defmodule ReactiveStruct do
   @doc false
   def generate_dependency_helpers do
     quote do
-      defp find_affected_computations(changed_fields, computations) do
-        changed_set = MapSet.new(changed_fields)
-        find_affected_computations_iterative(changed_set, computations, [])
-      end
-
-      defp find_affected_computations_iterative(affected_fields, computations, acc) do
-        newly_affected =
-          computations
-          |> Enum.filter(fn {field, deps, _} ->
-            field not in affected_fields and
-              Enum.any?(deps, &MapSet.member?(affected_fields, &1))
-          end)
-
-        case newly_affected do
-          [] ->
-            acc
-
-          _ ->
-            new_affected_fields =
-              newly_affected
-              |> Enum.map(&elem(&1, 0))
-              |> MapSet.new()
-              |> MapSet.union(affected_fields)
-
-            find_affected_computations_iterative(
-              new_affected_fields,
-              computations,
-              newly_affected ++ acc
-            )
-        end
-      end
+      # This function is no longer needed as it's moved to ReactiveStruct module
     end
   end
 
   @doc false
   def generate_sorting_helpers do
     quote do
-      defp topological_sort(computations) do
-        graph =
-          Enum.into(computations, %{}, fn {field, deps, comp} ->
-            {field, {deps, comp}}
-          end)
+      # This function is no longer needed as it's moved to ReactiveStruct module
+    end
+  end
 
-        topological_sort_helper(graph, [], MapSet.new())
-      end
+  # Helper functions that don't need module attributes
+  @doc false
+  def normalize_attrs(attrs, opts \\ []) do
+    if opts[:as_list] do
+      normalize_attrs_to_list(attrs)
+    else
+      normalize_attrs_to_map(attrs)
+    end
+  end
 
-      defp topological_sort_helper(graph, result, visited) when map_size(graph) == 0 do
-        Enum.reverse(result)
-      end
+  @doc false
+  def normalize_attrs_to_list(attrs) when is_list(attrs), do: attrs
+  def normalize_attrs_to_list(attrs) when is_map(attrs), do: Map.to_list(attrs)
 
-      defp topological_sort_helper(graph, result, visited) do
-        {field, {deps, comp}} =
-          Enum.find(graph, fn {_field, {deps, _comp}} ->
-            Enum.all?(deps, fn dep ->
-              not Map.has_key?(graph, dep) or MapSet.member?(visited, dep)
-            end)
-          end)
+  @doc false
+  def normalize_attrs_to_map(attrs) when is_list(attrs), do: Enum.into(attrs, %{})
+  def normalize_attrs_to_map(attrs) when is_map(attrs), do: attrs
 
-        new_graph = Map.delete(graph, field)
-        new_visited = MapSet.put(visited, field)
-        new_result = [{field, deps, comp} | result]
+  @doc false
+  def apply_changes(struct, changes) do
+    Enum.reduce(changes, struct, fn {key, value}, acc ->
+      Map.put(acc, key, value)
+    end)
+  end
 
-        topological_sort_helper(new_graph, new_result, new_visited)
+  @doc false
+  def get_computed_fields(computations) do
+    computations
+    |> Enum.map(&elem(&1, 0))
+    |> MapSet.new()
+  end
+
+  @doc false
+  def find_affected_computations_iterative(affected_fields, computations, acc) do
+    newly_affected =
+      computations
+      |> Enum.filter(fn {field, deps, _} ->
+        field not in affected_fields and
+          Enum.any?(deps, &MapSet.member?(affected_fields, &1))
+      end)
+
+    case newly_affected do
+      [] ->
+        acc
+
+      _ ->
+        new_affected_fields =
+          newly_affected
+          |> Enum.map(&elem(&1, 0))
+          |> MapSet.new()
+          |> MapSet.union(affected_fields)
+
+        find_affected_computations_iterative(
+          new_affected_fields,
+          computations,
+          newly_affected ++ acc
+        )
+    end
+  end
+
+  @doc false
+  def topological_sort_helper(graph, result, _visited) when map_size(graph) == 0 do
+    Enum.reverse(result)
+  end
+
+  def topological_sort_helper(graph, result, visited) do
+    {field, {deps, comp}} =
+      Enum.find(graph, fn {_field, {deps, _comp}} ->
+        Enum.all?(deps, fn dep ->
+          not Map.has_key?(graph, dep) or MapSet.member?(visited, dep)
+        end)
+      end)
+
+    new_graph = Map.delete(graph, field)
+    new_visited = MapSet.put(visited, field)
+    new_result = [{field, deps, comp} | result]
+
+    topological_sort_helper(new_graph, new_result, new_visited)
+  end
+
+  @doc false
+  def topological_sort(computations) do
+    graph =
+      Enum.into(computations, %{}, fn {field, deps, comp} ->
+        {field, {deps, comp}}
+      end)
+
+    topological_sort_helper(graph, [], MapSet.new())
+  end
+
+  @doc false
+  def find_affected_computations(changed_fields, computations) do
+    changed_set = MapSet.new(changed_fields)
+    find_affected_computations_iterative(changed_set, computations, [])
+  end
+
+  @doc false
+  def validate_field_updates(changed_fields, allow_setting_computed_fields, computations) do
+    unless allow_setting_computed_fields do
+      computed_fields = get_computed_fields(computations)
+      invalid_fields = Enum.filter(changed_fields, &MapSet.member?(computed_fields, &1))
+
+      if invalid_fields != [] do
+        field_list = invalid_fields |> Enum.map_join(", ", &":#{&1}")
+
+        raise ArgumentError,
+              "Cannot set computed fields #{field_list}. " <>
+                "Set `allow_setting_computed_fields: true` when using ReactiveStruct to enable this behavior."
       end
     end
+  end
+
+  @doc false
+  def recompute_all(struct, computations, module) do
+    computation_order = topological_sort(computations)
+
+    Enum.reduce(computation_order, struct, fn {field, deps, computation}, acc ->
+      recompute_field(acc, field, deps, computation, module)
+    end)
+  end
+
+  @doc false
+  def recompute_dependencies(struct, changed_fields, computations, module) do
+    affected_computations = find_affected_computations(changed_fields, computations)
+    computation_order = topological_sort(affected_computations)
+
+    Enum.reduce(computation_order, struct, fn {field, deps, computation}, acc ->
+      recompute_field(acc, field, deps, computation, module)
+    end)
+  end
+
+  @doc false
+  def recompute_field(struct, field, deps, _computation, module) do
+    function_name = String.to_atom("__compute_#{field}__")
+    dep_values = Enum.map(deps, &Map.get(struct, &1))
+    result = apply(module, function_name, dep_values)
+    Map.put(struct, field, result)
+  end
+
+  @doc false
+  def recompute_missing_computed_fields(struct, explicitly_set_fields, computations, module) do
+    # Only recompute computed fields that weren't explicitly set
+    computations_to_recompute =
+      computations
+      |> Enum.filter(fn {field, _deps, _computation} ->
+        not MapSet.member?(explicitly_set_fields, field)
+      end)
+
+    computation_order = topological_sort(computations_to_recompute)
+
+    Enum.reduce(computation_order, struct, fn {field, deps, computation}, acc ->
+      recompute_field(acc, field, deps, computation, module)
+    end)
   end
 
   @doc """
