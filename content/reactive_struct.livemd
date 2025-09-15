@@ -1,0 +1,39 @@
+# ReactiveStruct demo
+
+```elixir
+Mix.install([
+  {:kino, "~> 0.17.0"},
+  {:reactive_struct, github: "chgeuer/reactive_struct"}
+])
+```
+
+## Section
+
+```elixir
+defmodule Calculator do
+  use ReactiveStruct
+  defstruct ~w(a0 a b sum product)a
+
+  computed(:a, deps: [:a0], do: a0 + 1)
+  
+  computed(:sum, deps: [:a, :b], do: a + b)
+  
+  computed :product, deps: [:a, :b] do
+    a * b
+  end
+end
+```
+
+```elixir
+Calculator.mermaid()
+|> Kino.Mermaid.new()
+```
+
+```elixir
+Calculator.new(a0: 2, b: 3)
+|> IO.inspect(label: :a)
+|> Calculator.update(a0: 5)
+|> IO.inspect(label: :b)  
+|> Calculator.update(product: 5)
+|> IO.inspect(label: :c)  
+```
