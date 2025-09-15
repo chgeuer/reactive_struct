@@ -196,10 +196,13 @@ defmodule ReactiveStruct do
   """
 
   @doc false
-  defmacro __using__(_opts) do
+  defmacro __using__(opts) do
+    allow_updating_computed_fields = Keyword.get(opts, :allow_updating_computed_fields, false)
+
     quote do
       import ReactiveStruct
       @reactive_computations []
+      @allow_updating_computed_fields unquote(allow_updating_computed_fields)
       @before_compile ReactiveStruct
     end
   end
@@ -284,6 +287,8 @@ defmodule ReactiveStruct do
           attrs_list = normalize_attrs(attrs, as_list: true)
           changed_fields = Enum.map(attrs_list, &elem(&1, 0))
 
+          validate_field_updates(changed_fields)
+
           struct
           |> apply_changes(attrs_list)
           |> recompute_dependencies(changed_fields)
@@ -345,6 +350,27 @@ defmodule ReactiveStruct do
           Enum.reduce(changes, struct, fn {key, value}, acc ->
             Map.put(acc, key, value)
           end)
+        end
+      end,
+      quote do
+        defp validate_field_updates(changed_fields) do
+          unless @allow_updating_computed_fields do
+            computed_fields = get_computed_fields(@computations)
+            invalid_fields = Enum.filter(changed_fields, &MapSet.member?(computed_fields, &1))
+
+            if invalid_fields != [] do
+              field_list = invalid_fields |> Enum.map(&":#{&1}") |> Enum.join(", ")
+              raise ArgumentError, "Cannot update computed fields #{field_list}. " <>
+                "Set `allow_updating_computed_fields: true` when using ReactiveStruct to enable this behavior."
+            end
+          end
+        end
+      end,
+      quote do
+        defp get_computed_fields(computations) do
+          computations
+          |> Enum.map(&elem(&1, 0))
+          |> MapSet.new()
         end
       end
     ]

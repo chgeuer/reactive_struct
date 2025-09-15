@@ -3,7 +3,8 @@
 ```elixir
 Mix.install([
   {:kino, "~> 0.17.0"},
-  {:reactive_struct, github: "chgeuer/reactive_struct"}
+  # {:reactive_struct, github: "chgeuer/reactive_struct"}
+  {:reactive_struct, path: "/home/chgeuer/src/reactive_struct"}
 ])
 ```
 
@@ -11,7 +12,7 @@ Mix.install([
 
 ```elixir
 defmodule Calculator do
-  use ReactiveStruct
+  use ReactiveStruct, allow_updating_computed_fields: true
   defstruct ~w(a0 a b sum product)a
 
   computed(:a, deps: [:a0], do: a0 + 1)
