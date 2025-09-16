@@ -17,20 +17,18 @@ defmodule ReactiveStruct do
 
   1. `use ReactiveStruct` in your module
   2. Define your struct with `defstruct`
-  3. Define computed fields with `computed/3` macro
+  3. Define computed fields with `computed/2` macro
   4. Use `new/1` to create instances and `merge/2` to modify them
 
   ## Computed Field Syntax
 
-  Two syntaxes are supported:
+  Computed fields are defined using a function that receives a map of dependency values:
 
-      # Block syntax
-      computed :field_name, deps: [:dep1, :dep2] do
+      computed :field_name, fn %{dep1: dep1, dep2: dep2} ->
         dep1 + dep2
       end
 
-      # Inline syntax
-      computed(:field_name, deps: [:dep1, :dep2], do: dep1 + dep2)
+  The keys of the map pattern determine the dependencies automatically.
 
   ## Examples
 
@@ -41,11 +39,13 @@ defmodule ReactiveStruct do
       ...>
       ...>   defstruct [:a, :b, :sum, :product]
       ...>
-      ...>   computed :sum, deps: [:a, :b] do
+      ...>   computed :sum, fn %{a: a, b: b} ->
       ...>     a + b
       ...>   end
       ...>
-      ...>   computed(:product, deps: [:a, :b], do: a * b)
+      ...>   computed :product, fn %{a: a, b: b} ->
+      ...>     a * b
+      ...>   end
       ...> end
       iex> calc = Calculator.new(%{a: 5, b: 3})
       iex> calc.sum
@@ -67,11 +67,13 @@ defmodule ReactiveStruct do
       ...>
       ...>   defp helper(value), do: String.upcase(value)
       ...>
-      ...>   computed :processed, deps: [:input] do
+      ...>   computed :processed, fn %{input: input} ->
       ...>     helper(input)
       ...>   end
       ...>
-      ...>   computed(:length, deps: [:processed], do: String.length(processed))
+      ...>   computed :length, fn %{processed: processed} ->
+      ...>     String.length(processed)
+      ...>   end
       ...> end
       iex> processor = StringProcessor.new(%{input: "hello"})
       iex> processor.processed
@@ -85,10 +87,12 @@ defmodule ReactiveStruct do
       ...>   use ReactiveStruct
       ...>   defstruct [:input, :processed, :length]
       ...>   defp helper(value), do: String.upcase(value)
-      ...>   computed :processed, deps: [:input] do
+      ...>   computed :processed, fn %{input: input} ->
       ...>     helper(input)
       ...>   end
-      ...>   computed(:length, deps: [:processed], do: String.length(processed))
+      ...>   computed :length, fn %{processed: processed} ->
+      ...>     String.length(processed)
+      ...>   end
       ...> end
       iex> processor_kw = StringProcessor2.new(input: "world")
       iex> processor_kw.processed
@@ -101,9 +105,15 @@ defmodule ReactiveStruct do
       iex> defmodule Chain do
       ...>   use ReactiveStruct
       ...>   defstruct [:base, :base2, :step1, :step2, :final]
-      ...>   computed(:step1, deps: [:base, :base2], do: (base || 0) * 2 + (base2 || 0))
-      ...>   computed(:step2, deps: [:step1], do: step1 + 10)
-      ...>   computed(:final, deps: [:step2], do: step2 * step2)
+      ...>   computed :step1, fn %{base: base, base2: base2} ->
+      ...>     (base || 0) * 2 + (base2 || 0)
+      ...>   end
+      ...>   computed :step2, fn %{step1: step1} ->
+      ...>     step1 + 10
+      ...>   end
+      ...>   computed :final, fn %{step2: step2} ->
+      ...>     step2 * step2
+      ...>   end
       ...> end
       iex> chain = Chain.new(base: 3, base2: 1)
       iex> chain.final
@@ -127,7 +137,9 @@ defmodule ReactiveStruct do
       iex> defmodule APITest do
       ...>   use ReactiveStruct
       ...>   defstruct [:x, :y, :sum]
-      ...>   computed(:sum, deps: [:x, :y], do: (x || 0) + (y || 0))
+      ...>   computed :sum, fn %{x: x, y: y} ->
+      ...>     (x || 0) + (y || 0)
+      ...>   end
       ...> end
       iex>
       iex> # Test new with all required fields provided
@@ -150,8 +162,12 @@ defmodule ReactiveStruct do
       iex> defmodule MermaidTest do
       ...>   use ReactiveStruct
       ...>   defstruct [:a, :b, :sum, :product]
-      ...>   computed(:sum, deps: [:a, :b], do: (a || 0) + (b || 0))
-      ...>   computed(:product, deps: [:a, :b], do: (a || 0) * (b || 0))
+      ...>   computed :sum, fn %{a: a, b: b} ->
+      ...>     (a || 0) + (b || 0)
+      ...>   end
+      ...>   computed :product, fn %{a: a, b: b} ->
+      ...>     (a || 0) * (b || 0)
+      ...>   end
       ...> end
       iex>
       iex> diagram = MermaidTest.mermaid()
@@ -205,7 +221,7 @@ defmodule ReactiveStruct do
     required_fields = Keyword.get(opts, :required_fields, [])
 
     quote do
-      import ReactiveStruct, only: [computed: 2, computed: 3, defstruct: 1]
+      import ReactiveStruct, only: [computed: 2, defstruct: 1]
       import Kernel, except: [defstruct: 1]
       @reactive_computations []
       @reactive_struct_fields []
@@ -218,23 +234,15 @@ defmodule ReactiveStruct do
   @doc """
   Defines a computed field that automatically updates when dependencies change.
 
-  ## Parameters
-  - field: The field name (atom)
-  - opts: Options including :deps (list of dependency fields)
-  - block: The computation block that can access dependency values directly
+  Takes a function that receives a map with dependency values:
 
-  ## Example
-      computed :all_vms, deps: [:regions, :zones, :vm_count] do
-        regions * zones * vm_count
-      end
+      computed :sum, fn %{a: a, b: b} -> a + b end
+
+  The function parameter must be a map pattern that destructures the dependency values.
+  The keys of the map pattern determine which fields this computed field depends on.
   """
-  defmacro computed(field, opts, do: block) do
-    add_computation(field, opts, block)
-  end
-
-  defmacro computed(field, opts) do
-    block = Keyword.get(opts, :do)
-    add_computation(field, opts, block)
+  defmacro computed(field, fun) do
+    add_function_computation(field, fun)
   end
 
   @doc false
@@ -278,19 +286,40 @@ defmodule ReactiveStruct do
     []
   end
 
-  defp add_computation(field, opts, block) do
-    deps = Keyword.get(opts, :deps, [])
+  defp add_function_computation(field, fun) do
+    # Extract dependencies from the function parameter pattern
+    deps = extract_dependencies_from_function(fun)
 
     quote do
       @reactive_computations [
-        {unquote(field), unquote(deps), unquote(Macro.escape(block))} | @reactive_computations
+        {unquote(field), unquote(deps), unquote(Macro.escape(fun))} | @reactive_computations
       ]
     end
   end
 
+  defp extract_dependencies_from_function({:fn, _, [{:->, _, [[{:%{}, _, params}], _body]}]}) do
+    # Extract keys from map pattern like %{a: a, b: b}
+    Enum.map(params, fn
+      {key, _var} when is_atom(key) -> key
+      other -> raise ArgumentError, "Invalid dependency pattern: #{inspect(other)}"
+    end)
+  end
+
+  defp extract_dependencies_from_function(other) do
+    raise ArgumentError,
+          "Function must have pattern like fn %{a: a, b: b} -> ... end, got: #{inspect(other)}"
+  end
+
+  # Helper functions to normalize computation format
+  defp extract_field_and_deps({field, deps, _fun}), do: {field, deps}
+
+  defp get_computation_field({field, _deps, _fun}), do: field
+
+  defp get_computation_deps({_field, deps, _fun}), do: deps
+
   @doc false
   def generate_computation_functions(computations) do
-    for {field, deps, computation} <- computations do
+    for {field, deps, fun} <- computations do
       function_name = String.to_atom("__compute_#{field}__")
 
       # Create parameter bindings for the function
@@ -301,7 +330,16 @@ defmodule ReactiveStruct do
 
       quote do
         def unquote(function_name)(unquote_splicing(params)) do
-          unquote(computation)
+          # Create the map with dependency values and call the function
+          dep_map = %{
+            unquote_splicing(
+              for dep <- deps do
+                {dep, {dep, [], nil}}
+              end
+            )
+          }
+
+          unquote(fun).(dep_map)
         end
       end
     end
@@ -462,7 +500,7 @@ defmodule ReactiveStruct do
   @doc false
   def get_computed_fields(computations) do
     computations
-    |> Enum.map(&elem(&1, 0))
+    |> Enum.map(&get_computation_field/1)
     |> MapSet.new()
   end
 
@@ -479,7 +517,10 @@ defmodule ReactiveStruct do
   def find_affected_computations_iterative(affected_fields, computations, acc) do
     newly_affected =
       computations
-      |> Enum.filter(fn {field, deps, _} ->
+      |> Enum.filter(fn computation ->
+        field = get_computation_field(computation)
+        deps = get_computation_deps(computation)
+
         field not in affected_fields and
           Enum.any?(deps, &MapSet.member?(affected_fields, &1))
       end)
@@ -491,7 +532,7 @@ defmodule ReactiveStruct do
       _ ->
         new_affected_fields =
           newly_affected
-          |> Enum.map(&elem(&1, 0))
+          |> Enum.map(&get_computation_field/1)
           |> MapSet.new()
           |> MapSet.union(affected_fields)
 
@@ -527,7 +568,7 @@ defmodule ReactiveStruct do
   def topological_sort(computations) do
     # Strip computation part since it's never used after compilation
     computations
-    |> Enum.map(fn {field, deps, _comp} -> {field, deps} end)
+    |> Enum.map(&extract_field_and_deps/1)
     |> Enum.into(Map.new())
     |> topological_sort_helper([], MapSet.new())
   end
@@ -621,9 +662,8 @@ defmodule ReactiveStruct do
   @doc false
   def recompute_all(struct, computations, module) do
     # Convert to dependencies early for efficiency
-    for {field, deps, _computation} <- computations do
-      {field, deps}
-    end
+    computations
+    |> Enum.map(&extract_field_and_deps/1)
     |> topological_sort_dependencies()
     |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
@@ -634,7 +674,7 @@ defmodule ReactiveStruct do
   def recompute_dependencies(struct, changed_fields, computations, module) do
     # Find affected computations and strip computation part early
     find_affected_computations(changed_fields, computations)
-    |> Enum.map(fn {field, deps, _computation} -> {field, deps} end)
+    |> Enum.map(&extract_field_and_deps/1)
     |> topological_sort_dependencies()
     |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
@@ -651,10 +691,12 @@ defmodule ReactiveStruct do
 
   @doc false
   def recompute_missing_computed_fields(struct, explicitly_set_fields, computations, module) do
-    for {field, deps, _computation} <- computations,
-        not MapSet.member?(explicitly_set_fields, field) do
-      {field, deps}
-    end
+    computations
+    |> Enum.filter(fn computation ->
+      field = get_computation_field(computation)
+      not MapSet.member?(explicitly_set_fields, field)
+    end)
+    |> Enum.map(&extract_field_and_deps/1)
     |> topological_sort_dependencies()
     |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
@@ -712,7 +754,9 @@ defmodule ReactiveStruct do
 
   defp build_dependencies(computations) do
     computations
-    |> Enum.flat_map(fn {field, deps, _} ->
+    |> Enum.flat_map(fn computation ->
+      field = get_computation_field(computation)
+      deps = get_computation_deps(computation)
       Enum.map(deps, fn dep -> "    #{format_field_id(dep)} --> #{format_field_id(field)}" end)
     end)
     |> Enum.sort()

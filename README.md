@@ -26,7 +26,7 @@ end
 
 1. `use ReactiveStruct` in your module (optionally with configuration)
 2. Define your struct with `defstruct`
-3. Define computed fields with `computed/3` macro
+3. Define computed fields with `computed/2` macro
 4. Create instances with `new/1` and modify with `update/2`
 
 ### Configuration Options
@@ -50,18 +50,18 @@ defmodule Calculator do
   use ReactiveStruct
   defstruct ~w(a0 a b sum product)a
 
-  computed(:a, deps: [:a0], do: a0 + 1)
+  computed(:a, fn %{a0: a0} -> a0 + 1 end)
   
-  computed(:sum, deps: [:a, :b], do: a + b)
+  computed(:sum, fn %{a: a, b: b} -> a + b end)
   
-  computed :product, deps: [:a, :b] do
+  computed :product, fn %{a: a, b: b} ->
     a * b
   end
 end
 
 Calculator.new(a0: 2, b: 3)
 |> IO.inspect(label: :a)    # %Calculator{a0: 2, a: 3, b: 3, sum: 6, product: 9}
-|> Calculator.update(a0: 5)
+|> Calculator.merge(a0: 5)
 |> IO.inspect(label: :b)    # %Calculator{a0: 5, a: 6, b: 3, sum: 9, product: 18}
 ```
 
@@ -91,16 +91,10 @@ flowchart TD
 
 ## Syntax
 
-Two syntaxes are supported for defining computed fields:
-
 ```elixir
-# Block syntax
-computed :field_name, deps: [:dep1, :dep2] do
+computed(:field_name, fn %{dep1: dep1, dep2: dep2} ->
   dep1 + dep2
-end
-
-# Inline syntax
-computed(:field_name, deps: [:dep1, :dep2], do: dep1 + dep2)
+end)
 ```
 
 ## Complex Dependencies
@@ -112,15 +106,15 @@ defmodule Chain do
   use ReactiveStruct
   defstruct [:base, :step1, :step2, :final]
 
-  computed(:step1, deps: [:base], do: base * 2)
-  computed(:step2, deps: [:step1], do: step1 + 10)
-  computed(:final, deps: [:step2], do: step2 * step2)
+  computed :step1, fn %{base: base} -> base * 2 end
+  computed :step2, fn %{step1: step1} -> step1 + 10 end
+  computed :final, fn %{step2: step2} -> step2 * step2 end
 end
 
 chain = Chain.new(base: 3)
 chain.final  # 256
 
-updated = Chain.update(chain, :base, 5)
+updated = Chain.merge(chain, :base, 5)
 updated.final  # 400
 ```
 
@@ -133,16 +127,16 @@ defmodule Calculator do
   use ReactiveStruct
   defstruct [:a, :b, :sum]
 
-  computed(:sum, deps: [:a, :b], do: a + b)
+  computed :sum, fn %{a: a, b: b} -> a + b end
 end
 
 calc = Calculator.new(a: 1, b: 2)
 
 # ✓ This works - updating input fields
-Calculator.update(calc, :a, 10)
+Calculator.merge(calc, :a, 10)
 
 # ✗ This raises ArgumentError - updating computed field
-Calculator.update(calc, :sum, 100)
+Calculator.merge(calc, :sum, 100)
 ```
 
 To allow updating computed fields (which may break dependency consistency):
@@ -152,13 +146,13 @@ defmodule FlexibleCalculator do
   use ReactiveStruct, allow_updating_computed_fields: true
   defstruct [:a, :b, :sum]
 
-  computed(:sum, deps: [:a, :b], do: a + b)
+  computed :sum, fn %{a: a, b: b} -> a + b end
 end
 
 calc = FlexibleCalculator.new(a: 1, b: 2)
 
 # ✓ This now works - computed field can be updated directly
-FlexibleCalculator.update(calc, :sum, 100)
+FlexibleCalculator.merge(calc, :sum, 100)
 ```
 
 ## API Functions
@@ -166,14 +160,14 @@ FlexibleCalculator.update(calc, :sum, 100)
 ReactiveStruct generates these functions:
 
 - `new/1` - Create instance with initial values (map or keyword list)
-- `update/2` - Update single field or multiple fields
+- `merge/2` - Update single field or multiple fields
 - `put/3` - Alias for single field update
 - `mermaid/0` - Generate dependency visualization
 
 ```elixir
 # Multiple field updates
-multi = MyStruct.update(struct, %{x: 10, y: 20})
-multi = MyStruct.update(struct, x: 10, y: 20)
+multi = MyStruct.merge(struct, %{x: 10, y: 20})
+multi = MyStruct.merge(struct, x: 10, y: 20)
 
 # Single field update
 single = MyStruct.put(struct, :x, 100)
@@ -188,8 +182,8 @@ defmodule Example do
   use ReactiveStruct
   defstruct [:a, :b, :sum, :product]
 
-  computed(:sum, deps: [:a, :b], do: a + b)
-  computed(:product, deps: [:a, :b], do: a * b)
+  computed :sum, fn %{a: a, b: b} -> a + b end
+  computed :product, fn %{a: a, b: b} -> a * b end
 end
 
 Example.mermaid()

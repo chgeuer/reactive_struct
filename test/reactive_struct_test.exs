@@ -8,9 +8,9 @@ defmodule ReactiveStructTest do
 
       defstruct [:x, :y, :sum]
 
-      computed :sum, deps: [:x, :y] do
+      computed(:sum, fn %{x: x, y: y} ->
         x + y
-      end
+      end)
     end
 
     struct = TestStruct.new(%{x: 1, y: 2})
@@ -26,9 +26,9 @@ defmodule ReactiveStructTest do
 
       defstruct [:a, :b, :sum]
 
-      computed :sum, deps: [:a, :b] do
+      computed(:sum, fn %{a: a, b: b} ->
         if a && b, do: a + b, else: nil
-      end
+      end)
     end
 
     # Test with keyword list
@@ -51,9 +51,9 @@ defmodule ReactiveStructTest do
 
       defstruct [:x, :y, :sum]
 
-      computed :sum, deps: [:x, :y] do
+      computed(:sum, fn %{x: x, y: y} ->
         x + y
-      end
+      end)
     end
 
     # Creating with input fields should work
@@ -86,9 +86,9 @@ defmodule ReactiveStructTest do
 
       defstruct [:x, :y, :sum]
 
-      computed :sum, deps: [:x, :y] do
+      computed(:sum, fn %{x: x, y: y} ->
         x + y
-      end
+      end)
     end
 
     # Creating with computed fields should now work
@@ -113,9 +113,9 @@ defmodule ReactiveStructTest do
 
       defstruct [:x, :y, :sum]
 
-      computed :sum, deps: [:x, :y] do
+      computed(:sum, fn %{x: x, y: y} ->
         x + y
-      end
+      end)
     end
 
     # Old option name should still work
@@ -132,7 +132,9 @@ defmodule ReactiveStructTest do
 
       defstruct [:name, :age, :display_name]
 
-      computed(:display_name, deps: [:name, :age], do: "#{name} (#{age})")
+      computed(:display_name, fn %{name: name, age: age} ->
+        "#{name} (#{age})"
+      end)
     end
 
     # Test valid attributes - all non-computed fields are required
@@ -168,7 +170,9 @@ defmodule ReactiveStructTest do
 
       defstruct [:name, :age, :extra_required, :display_name]
 
-      computed(:display_name, deps: [:name, :age], do: "#{name} (#{age})")
+      computed(:display_name, fn %{name: name, age: age} ->
+        "#{name} (#{age})"
+      end)
     end
 
     # All non-computed fields should be required (name, age, extra_required)
@@ -206,11 +210,15 @@ defmodule ReactiveStructTest do
 
       defstruct [:input_field, :optional_field, :computed]
 
-      computed(:computed, deps: [:input_field], do: input_field * 2)
+      computed(:computed, fn %{input_field: input_field} ->
+        input_field * 2
+      end)
     end
 
     # Create a mock computations list like what would be stored in @computations
-    mock_computations = [{:computed, [:input_field], quote(do: input_field * 2)}]
+    mock_computations = [
+      {:computed, [:input_field], fn %{input_field: input_field} -> input_field * 2 end}
+    ]
 
     # Test the schema generation function directly
     schema = ReactiveStruct.build_schema_for_module(SchemaTestStruct, [], mock_computations)
