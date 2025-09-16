@@ -53,7 +53,7 @@ defmodule Chain do
   computed(:final, deps: [:step2], do: step2 * step2)
 end
 
-Chain.new(base: 2, base2: 5)
+Chain.new(base: 2)
 
 # chain = %{final: 256} = Chain.new(base: 3)
 # chain = %{final: 400} = Chain.up

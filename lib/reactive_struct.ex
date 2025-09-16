@@ -526,12 +526,17 @@ defmodule ReactiveStruct do
   @doc false
   def topological_sort(computations) do
     # Strip computation part since it's never used after compilation
-    dependency_graph =
-      computations
-      |> Enum.map(fn {field, deps, _comp} -> {field, deps} end)
-      |> Enum.into(%{})
+    computations
+    |> Enum.map(fn {field, deps, _comp} -> {field, deps} end)
+    |> Enum.into(Map.new())
+    |> topological_sort_helper([], MapSet.new())
+  end
 
-    topological_sort_helper(dependency_graph, [], MapSet.new())
+  @doc false
+  def topological_sort_dependencies(dependencies) do
+    dependencies
+    |> Enum.into(Map.new())
+    |> topological_sort_helper([], MapSet.new())
   end
 
   @doc false
@@ -542,7 +547,7 @@ defmodule ReactiveStruct do
 
   @doc false
   def validate_field_updates(changed_fields, allow_setting_computed_fields, computations) do
-    unless allow_setting_computed_fields do
+    if !allow_setting_computed_fields do
       computed_fields = get_computed_fields(computations)
       invalid_fields = Enum.filter(changed_fields, &MapSet.member?(computed_fields, &1))
 
@@ -559,9 +564,10 @@ defmodule ReactiveStruct do
   @doc false
   def validate_attrs_with_schema(attrs, manual_required_fields, computations, module) do
     schema = build_schema_for_module(module, manual_required_fields, computations)
-    attrs_as_keyword = normalize_attrs_to_list(attrs)
 
-    case NimbleOptions.validate(attrs_as_keyword, schema) do
+    normalize_attrs_to_list(attrs)
+    |> NimbleOptions.validate(schema)
+    |> case do
       {:ok, validated_attrs} ->
         Enum.into(validated_attrs, %{})
 
@@ -572,9 +578,9 @@ defmodule ReactiveStruct do
 
   @doc false
   def validate_attrs_with_precomputed_schema(attrs, schema) do
-    attrs_as_keyword = normalize_attrs_to_list(attrs)
-
-    case NimbleOptions.validate(attrs_as_keyword, schema) do
+    normalize_attrs_to_list(attrs)
+    |> NimbleOptions.validate(schema)
+    |> case do
       {:ok, validated_attrs} ->
         Enum.into(validated_attrs, %{})
 
@@ -614,8 +620,11 @@ defmodule ReactiveStruct do
 
   @doc false
   def recompute_all(struct, computations, module) do
-    computations
-    |> topological_sort()
+    # Convert to dependencies early for efficiency
+    for {field, deps, _computation} <- computations do
+      {field, deps}
+    end
+    |> topological_sort_dependencies()
     |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
     end)
@@ -623,8 +632,10 @@ defmodule ReactiveStruct do
 
   @doc false
   def recompute_dependencies(struct, changed_fields, computations, module) do
+    # Find affected computations and strip computation part early
     find_affected_computations(changed_fields, computations)
-    |> topological_sort()
+    |> Enum.map(fn {field, deps, _computation} -> {field, deps} end)
+    |> topological_sort_dependencies()
     |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
     end)
@@ -640,12 +651,11 @@ defmodule ReactiveStruct do
 
   @doc false
   def recompute_missing_computed_fields(struct, explicitly_set_fields, computations, module) do
-    # Only recompute computed fields that weren't explicitly set
-    computations
-    |> Enum.filter(fn {field, _deps, _computation} ->
-      not MapSet.member?(explicitly_set_fields, field)
-    end)
-    |> topological_sort()
+    for {field, deps, _computation} <- computations,
+        not MapSet.member?(explicitly_set_fields, field) do
+      {field, deps}
+    end
+    |> topological_sort_dependencies()
     |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
     end)
