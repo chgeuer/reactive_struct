@@ -11,7 +11,7 @@ defmodule ReactiveStruct do
   - **Automatic dependency tracking**: Fields are recomputed only when their dependencies change
   - **Topological sorting**: Computations are executed in the correct order to handle chains of dependencies
   - **Lazy evaluation**: Only affected fields are recomputed, not the entire struct
-  - **Clean API**: Simple `new/1`, `merge/2`, and `put/3` functions for struct manipulation
+  - **Clean API**: Simple `new/1` and `merge/2` functions for struct manipulation
 
   ## Usage
 
@@ -129,7 +129,6 @@ defmodule ReactiveStruct do
   - `new/1` - Create a new instance with initial values
   - `merge/2` - Merge a single field
   - `merge/2` - Merge multiple fields (map or keyword list)
-  - `put/3` - Alias for `merge/2` with single field
   - `mermaid/0` - Generate a MermaidJS flowchart diagram of field dependencies
 
   ### API Examples
@@ -152,10 +151,6 @@ defmodule ReactiveStruct do
       iex> multi.sum
       30
       iex>
-      iex> # Test put function (alias for merge)
-      iex> put_result = APITest.put(multi, :x, 100)
-      iex> put_result.sum
-      120
 
   ### Mermaid Diagram Generation
 
@@ -208,7 +203,7 @@ defmodule ReactiveStruct do
   - Individual computation functions for each computed field
   - Dependency tracking and affected field calculation
   - Topological sorting for correct computation order
-  - Public API functions (`new/1`, `merge/2`, `put/3`)
+  - Public API functions (`new/1`, `merge/2`)
   """
 
   @doc false
@@ -392,8 +387,6 @@ defmodule ReactiveStruct do
           |> apply_changes(attrs_list)
           |> recompute_dependencies(changed_fields)
         end
-
-        def put(struct, key, value), do: merge(struct, key, value)
 
         @doc """
         Generates a MermaidJS flowchart diagram showing field dependencies.

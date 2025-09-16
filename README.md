@@ -160,9 +160,9 @@ FlexibleCalculator.merge(calc, :sum, 100)
 ReactiveStruct generates these functions:
 
 - `new/1` - Create instance with initial values (map or keyword list)
-- `merge/2` - Update single field or multiple fields
-- `put/3` - Alias for single field update
-- `mermaid/0` - Generate dependency visualization
+- `merge/2` - Update multiple fields (map or keyword list)
+- `merge/3` - Update single field
+- `mermaid/0` - Generate dependency visualization in MermaidJS syntax
 
 ```elixir
 # Multiple field updates
@@ -170,7 +170,7 @@ multi = MyStruct.merge(struct, %{x: 10, y: 20})
 multi = MyStruct.merge(struct, x: 10, y: 20)
 
 # Single field update
-single = MyStruct.put(struct, :x, 100)
+single = MyStruct.merge(struct, :x, 100)
 ```
 
 ## Visualization
@@ -227,7 +227,3 @@ ReactiveStruct validates dependencies at compile time and runtime:
 - **Compilation**: O(n²) for dependency analysis
 - **Runtime updates**: O(k) where k = affected computed fields
 - **Memory**: Minimal overhead, metadata stored at compile time
-
-## License
-
-This project is licensed under the same terms as Elixir.
