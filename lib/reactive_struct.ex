@@ -100,17 +100,17 @@ defmodule ReactiveStruct do
 
       iex> defmodule Chain do
       ...>   use ReactiveStruct
-      ...>   defstruct [:base, :step1, :step2, :final]
-      ...>   computed(:step1, deps: [:base], do: base * 2)
+      ...>   defstruct [:base, :base2, :step1, :step2, :final]
+      ...>   computed(:step1, deps: [:base, :base2], do: (base || 0) * 2 + (base2 || 0))
       ...>   computed(:step2, deps: [:step1], do: step1 + 10)
       ...>   computed(:final, deps: [:step2], do: step2 * step2)
       ...> end
-      iex> chain = Chain.new(base: 3)
+      iex> chain = Chain.new(base: 3, base2: 1)
       iex> chain.final
-      256
+      289
       iex> updated = Chain.update(chain, :base, 5)
       iex> updated.final
-      400
+      441
 
   ## Generated API Functions
 
@@ -130,13 +130,13 @@ defmodule ReactiveStruct do
       ...>   computed(:sum, deps: [:x, :y], do: (x || 0) + (y || 0))
       ...> end
       iex>
-      iex> # Test new with empty map
-      iex> empty = APITest.new()
-      iex> empty.sum
+      iex> # Test new with all required fields provided
+      iex> instance = APITest.new(x: 0, y: 0)
+      iex> instance.sum
       0
       iex>
       iex> # Test multiple field updates
-      iex> multi = APITest.update(empty, %{x: 10, y: 20})
+      iex> multi = APITest.update(instance, %{x: 10, y: 20})
       iex> multi.sum
       30
       iex>
@@ -202,10 +202,13 @@ defmodule ReactiveStruct do
     allow_setting_computed_fields =
       Keyword.get(opts, :allow_updating_computed_fields, allow_setting_computed_fields)
 
+    required_fields = Keyword.get(opts, :required_fields, [])
+
     quote do
       import ReactiveStruct, only: [computed: 2, computed: 3]
       @reactive_computations []
       @allow_setting_computed_fields unquote(allow_setting_computed_fields)
+      @required_fields unquote(required_fields)
       @before_compile ReactiveStruct
     end
   end
@@ -276,27 +279,28 @@ defmodule ReactiveStruct do
         def new(attrs \\ %{}) do
           normalized_attrs = normalize_attrs(attrs)
 
+          # Validate with schema using NimbleOptions
+          validated_attrs = validate_attrs_with_schema(normalized_attrs)
+
           # Validate fields being set during initialization
-          changed_fields = Map.keys(normalized_attrs)
+          changed_fields = Map.keys(validated_attrs)
           validate_field_updates(changed_fields)
 
-          struct = struct(__MODULE__, normalized_attrs)
+          struct = struct(__MODULE__, validated_attrs)
 
           # Only recompute fields that weren't explicitly set
           if @allow_setting_computed_fields do
-            explicitly_set_fields = MapSet.new(Map.keys(normalized_attrs))
+            explicitly_set_fields = MapSet.new(Map.keys(validated_attrs))
             recompute_missing_computed_fields(struct, explicitly_set_fields)
           else
             recompute_all(struct)
           end
         end
-      end,
-      quote do
+
         def update(struct, key, value) when is_atom(key) do
           update(struct, [{key, value}])
         end
-      end,
-      quote do
+
         def update(struct, attrs) when is_list(attrs) or is_map(attrs) do
           attrs_list = normalize_attrs(attrs, as_list: true)
           changed_fields = Enum.map(attrs_list, &elem(&1, 0))
@@ -307,13 +311,9 @@ defmodule ReactiveStruct do
           |> apply_changes(attrs_list)
           |> recompute_dependencies(changed_fields)
         end
-      end,
-      quote do
-        def put(struct, key, value) do
-          update(struct, key, value)
-        end
-      end,
-      quote do
+
+        def put(struct, key, value), do: update(struct, key, value)
+
         @doc """
         Generates a MermaidJS flowchart diagram showing field dependencies.
 
@@ -346,18 +346,25 @@ defmodule ReactiveStruct do
         defp normalize_attrs(attrs, opts \\ []) do
           ReactiveStruct.normalize_attrs(attrs, opts)
         end
-      end,
-      quote do
+
         defp apply_changes(struct, changes) do
           ReactiveStruct.apply_changes(struct, changes)
         end
-      end,
-      quote do
+
         defp validate_field_updates(changed_fields) do
           ReactiveStruct.validate_field_updates(
             changed_fields,
             @allow_setting_computed_fields,
             @computations
+          )
+        end
+
+        defp validate_attrs_with_schema(attrs) do
+          ReactiveStruct.validate_attrs_with_schema(
+            attrs,
+            @required_fields,
+            @computations,
+            __MODULE__
           )
         end
       end
@@ -383,20 +390,6 @@ defmodule ReactiveStruct do
           __MODULE__
         )
       end
-    end
-  end
-
-  @doc false
-  def generate_dependency_helpers do
-    quote do
-      # This function is no longer needed as it's moved to ReactiveStruct module
-    end
-  end
-
-  @doc false
-  def generate_sorting_helpers do
-    quote do
-      # This function is no longer needed as it's moved to ReactiveStruct module
     end
   end
 
@@ -430,6 +423,15 @@ defmodule ReactiveStruct do
     computations
     |> Enum.map(&elem(&1, 0))
     |> MapSet.new()
+  end
+
+  @doc false
+  def get_input_fields(computations, struct_fields) do
+    computed_fields = get_computed_fields(computations)
+
+    # Input fields are all struct fields that are not computed
+    MapSet.new(struct_fields)
+    |> MapSet.difference(computed_fields)
   end
 
   @doc false
@@ -482,12 +484,10 @@ defmodule ReactiveStruct do
 
   @doc false
   def topological_sort(computations) do
-    graph =
-      Enum.into(computations, %{}, fn {field, deps, comp} ->
-        {field, {deps, comp}}
-      end)
-
-    topological_sort_helper(graph, [], MapSet.new())
+    Enum.into(computations, %{}, fn {field, deps, comp} ->
+      {field, {deps, comp}}
+    end)
+    |> topological_sort_helper([], MapSet.new())
   end
 
   @doc false
@@ -510,6 +510,49 @@ defmodule ReactiveStruct do
                 "Set `allow_setting_computed_fields: true` when using ReactiveStruct to enable this behavior."
       end
     end
+  end
+
+  @doc false
+  def validate_attrs_with_schema(attrs, manual_required_fields, computations, module) do
+    schema = build_schema_for_module(module, manual_required_fields, computations)
+    attrs_as_keyword = normalize_attrs_to_list(attrs)
+
+    case NimbleOptions.validate(attrs_as_keyword, schema) do
+      {:ok, validated_attrs} ->
+        Enum.into(validated_attrs, %{})
+
+      {:error, %NimbleOptions.ValidationError{} = error} ->
+        raise ArgumentError, "Invalid attributes: #{Exception.message(error)}"
+    end
+  end
+
+  @doc false
+  def build_schema_for_module(module, manual_required_fields, computations) do
+    struct_fields = get_struct_fields(module)
+
+    # Automatically detect input fields (fields used as dependencies but not computed)
+    auto_required_fields = get_input_fields(computations, struct_fields)
+
+    # Combine manual and auto-detected required fields
+    all_required_fields =
+      MapSet.union(
+        MapSet.new(manual_required_fields),
+        auto_required_fields
+      )
+
+    struct_fields
+    |> Enum.map(fn field ->
+      options = [type: :any]
+
+      options =
+        if MapSet.member?(all_required_fields, field) do
+          [{:required, true} | options]
+        else
+          options
+        end
+
+      {field, options}
+    end)
   end
 
   @doc false
@@ -612,11 +655,13 @@ defmodule ReactiveStruct do
     |> Enum.sort()
   end
 
+  @input_style "fill:#e1f5fe,stroke:#0277bd"
+  @computed_style "fill:#f3e5f5,stroke:#7b1fa2"
+
   defp build_styling do
     [
-      "    %% Styling",
-      "    classDef inputField fill:#e1f5fe,stroke:#0277bd,stroke-width:2px",
-      "    classDef computedField fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px"
+      "    classDef inputField #{@input_style},stroke-width:2px",
+      "    classDef computedField #{@computed_style},stroke-width:2px"
     ]
   end
 
@@ -639,7 +684,7 @@ defmodule ReactiveStruct do
     "#{format_field_id(field)}[#{field}]"
   end
 
-  defp format_field_id(field) do
+  defp format_field_id(field) when is_atom(field) do
     field
     |> Atom.to_string()
     |> String.upcase()
@@ -656,8 +701,6 @@ defmodule ReactiveStruct do
       unquote_splicing(ReactiveStruct.generate_computation_functions(computations))
       unquote(ReactiveStruct.generate_api_functions())
       unquote(ReactiveStruct.generate_computation_helpers())
-      unquote(ReactiveStruct.generate_dependency_helpers())
-      unquote(ReactiveStruct.generate_sorting_helpers())
     end
   end
 end

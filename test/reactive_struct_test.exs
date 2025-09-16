@@ -39,10 +39,10 @@ defmodule ReactiveStructTest do
     struct_map = KeywordTestStruct.new(%{a: 5, b: 15})
     assert struct_map.sum == 20
 
-    # Test with empty keyword list
-    struct_empty = KeywordTestStruct.new([])
-    assert struct_empty.a == nil
-    assert struct_empty.sum == nil
+    # Test with empty keyword list should now fail since all non-computed fields are required
+    assert_raise ArgumentError, ~r/Invalid attributes:.*required.*(a|b)/, fn ->
+      KeywordTestStruct.new([])
+    end
   end
 
   test "computed fields cannot be set by default" do
@@ -124,5 +124,112 @@ defmodule ReactiveStructTest do
 
     updated = BackwardsCompatStruct.update(struct, :sum, 200)
     assert updated.sum == 200
+  end
+
+  test "nimble_options validation with automatic required fields" do
+    defmodule AutoRequiredStruct do
+      use ReactiveStruct
+
+      defstruct [:name, :age, :display_name]
+
+      computed(:display_name, deps: [:name, :age], do: "#{name} (#{age})")
+    end
+
+    # Test valid attributes - all non-computed fields are required
+    valid_struct = AutoRequiredStruct.new(%{name: "John", age: 30})
+    assert valid_struct.name == "John"
+    assert valid_struct.age == 30
+    assert valid_struct.display_name == "John (30)"
+
+    # Test with keyword list
+    valid_kw = AutoRequiredStruct.new(name: "Jane", age: 25)
+    assert valid_kw.name == "Jane"
+    assert valid_kw.display_name == "Jane (25)"
+
+    # Test missing required field should raise - name is automatically required
+    assert_raise ArgumentError, ~r/Invalid attributes:.*required.*name/, fn ->
+      AutoRequiredStruct.new(%{age: 30})
+    end
+
+    # Test missing required field should raise - age is automatically required
+    assert_raise ArgumentError, ~r/Invalid attributes:.*required.*age/, fn ->
+      AutoRequiredStruct.new(%{name: "John"})
+    end
+
+    # Test empty map should raise for both automatically required fields
+    assert_raise ArgumentError, ~r/Invalid attributes:/, fn ->
+      AutoRequiredStruct.new(%{})
+    end
+  end
+
+  test "manual required fields combined with automatic detection" do
+    defmodule MixedRequiredStruct do
+      use ReactiveStruct, required_fields: [:extra_required]
+
+      defstruct [:name, :age, :extra_required, :display_name]
+
+      computed(:display_name, deps: [:name, :age], do: "#{name} (#{age})")
+    end
+
+    # All non-computed fields should be required (name, age, extra_required)
+    valid_struct = MixedRequiredStruct.new(%{name: "John", age: 30, extra_required: "value"})
+    assert valid_struct.name == "John"
+    assert valid_struct.display_name == "John (30)"
+
+    # Missing any non-computed field should raise
+    assert_raise ArgumentError, ~r/Invalid attributes:.*required.*extra_required/, fn ->
+      MixedRequiredStruct.new(%{name: "John", age: 30})
+    end
+  end
+
+  test "nimble_options validation with unknown fields" do
+    defmodule SimpleStruct do
+      use ReactiveStruct
+
+      defstruct [:x, :y]
+    end
+
+    # Test that valid fields work
+    struct = SimpleStruct.new(%{x: 1, y: 2})
+    assert struct.x == 1
+    assert struct.y == 2
+
+    # Test that unknown fields are rejected by NimbleOptions
+    assert_raise ArgumentError, ~r/Invalid attributes:.*unknown options.*:unknown/, fn ->
+      SimpleStruct.new(%{x: 1, y: 2, unknown: "rejected"})
+    end
+  end
+
+  test "nimble_options schema generation" do
+    defmodule SchemaTestStruct do
+      use ReactiveStruct
+
+      defstruct [:input_field, :optional_field, :computed]
+
+      computed(:computed, deps: [:input_field], do: input_field * 2)
+    end
+
+    # Create a mock computations list like what would be stored in @computations
+    mock_computations = [{:computed, [:input_field], quote(do: input_field * 2)}]
+
+    # Test the schema generation function directly
+    schema = ReactiveStruct.build_schema_for_module(SchemaTestStruct, [], mock_computations)
+
+    # Should have entries for all struct fields
+    schema_keys = Keyword.keys(schema)
+    assert :input_field in schema_keys
+    assert :optional_field in schema_keys
+    assert :computed in schema_keys
+
+    # All non-computed fields should be required automatically
+    input_field_options = Keyword.get(schema, :input_field)
+    assert Keyword.get(input_field_options, :required) == true
+
+    optional_field_options = Keyword.get(schema, :optional_field)
+    assert Keyword.get(optional_field_options, :required) == true
+
+    # Computed field should not be required
+    computed_options = Keyword.get(schema, :computed)
+    assert Keyword.get(computed_options, :required) != true
   end
 end

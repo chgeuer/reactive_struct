@@ -29,7 +29,8 @@ defmodule ReactiveStruct.MixProject do
   defp deps do
     [
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      {:nimble_options, "~> 1.1"}
     ]
   end
 
