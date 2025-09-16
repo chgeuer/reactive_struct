@@ -509,8 +509,8 @@ defmodule ReactiveStruct do
   end
 
   def topological_sort_helper(graph, result, visited) do
-    {field, {deps, comp}} =
-      Enum.find(graph, fn {_field, {deps, _comp}} ->
+    {field, deps} =
+      Enum.find(graph, fn {_field, deps} ->
         Enum.all?(deps, fn dep ->
           not Map.has_key?(graph, dep) or MapSet.member?(visited, dep)
         end)
@@ -518,17 +518,20 @@ defmodule ReactiveStruct do
 
     new_graph = Map.delete(graph, field)
     new_visited = MapSet.put(visited, field)
-    new_result = [{field, deps, comp} | result]
+    new_result = [{field, deps} | result]
 
     topological_sort_helper(new_graph, new_result, new_visited)
   end
 
   @doc false
   def topological_sort(computations) do
-    Enum.into(computations, %{}, fn {field, deps, comp} ->
-      {field, {deps, comp}}
-    end)
-    |> topological_sort_helper([], MapSet.new())
+    # Strip computation part since it's never used after compilation
+    dependency_graph =
+      computations
+      |> Enum.map(fn {field, deps, _comp} -> {field, deps} end)
+      |> Enum.into(%{})
+
+    topological_sort_helper(dependency_graph, [], MapSet.new())
   end
 
   @doc false
@@ -613,7 +616,7 @@ defmodule ReactiveStruct do
   def recompute_all(struct, computations, module) do
     computations
     |> topological_sort()
-    |> Enum.reduce(struct, fn {field, deps, _computation}, acc ->
+    |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
     end)
   end
@@ -622,7 +625,7 @@ defmodule ReactiveStruct do
   def recompute_dependencies(struct, changed_fields, computations, module) do
     find_affected_computations(changed_fields, computations)
     |> topological_sort()
-    |> Enum.reduce(struct, fn {field, deps, _computation}, acc ->
+    |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
     end)
   end
@@ -643,7 +646,7 @@ defmodule ReactiveStruct do
       not MapSet.member?(explicitly_set_fields, field)
     end)
     |> topological_sort()
-    |> Enum.reduce(struct, fn {field, deps, _computation}, acc ->
+    |> Enum.reduce(struct, fn {field, deps}, acc ->
       recompute_field(acc, field, deps, module)
     end)
   end
