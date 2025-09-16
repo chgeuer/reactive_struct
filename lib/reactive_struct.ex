@@ -11,14 +11,14 @@ defmodule ReactiveStruct do
   - **Automatic dependency tracking**: Fields are recomputed only when their dependencies change
   - **Topological sorting**: Computations are executed in the correct order to handle chains of dependencies
   - **Lazy evaluation**: Only affected fields are recomputed, not the entire struct
-  - **Clean API**: Simple `new/1`, `update/2`, and `put/3` functions for struct manipulation
+  - **Clean API**: Simple `new/1`, `merge/2`, and `put/3` functions for struct manipulation
 
   ## Usage
 
   1. `use ReactiveStruct` in your module
   2. Define your struct with `defstruct`
   3. Define computed fields with `computed/3` macro
-  4. Use `new/1` to create instances and `update/2` to modify them
+  4. Use `new/1` to create instances and `merge/2` to modify them
 
   ## Computed Field Syntax
 
@@ -52,7 +52,7 @@ defmodule ReactiveStruct do
       8
       iex> calc.product
       15
-      iex> updated = Calculator.update(calc, :a, 10)
+      iex> updated = Calculator.merge(calc, :a, 10)
       iex> updated.sum
       13
       iex> updated.product
@@ -108,7 +108,7 @@ defmodule ReactiveStruct do
       iex> chain = Chain.new(base: 3, base2: 1)
       iex> chain.final
       289
-      iex> updated = Chain.update(chain, :base, 5)
+      iex> updated = Chain.merge(chain, :base, 5)
       iex> updated.final
       441
 
@@ -117,9 +117,9 @@ defmodule ReactiveStruct do
   When you `use ReactiveStruct`, the following functions are automatically generated:
 
   - `new/1` - Create a new instance with initial values
-  - `update/2` - Update a single field
-  - `update/2` - Update multiple fields (map or keyword list)
-  - `put/3` - Alias for `update/2` with single field
+  - `merge/2` - Merge a single field
+  - `merge/2` - Merge multiple fields (map or keyword list)
+  - `put/3` - Alias for `merge/2` with single field
   - `mermaid/0` - Generate a MermaidJS flowchart diagram of field dependencies
 
   ### API Examples
@@ -136,11 +136,11 @@ defmodule ReactiveStruct do
       0
       iex>
       iex> # Test multiple field updates
-      iex> multi = APITest.update(instance, %{x: 10, y: 20})
+      iex> multi = APITest.merge(instance, %{x: 10, y: 20})
       iex> multi.sum
       30
       iex>
-      iex> # Test put function (alias for update)
+      iex> # Test put function (alias for merge)
       iex> put_result = APITest.put(multi, :x, 100)
       iex> put_result.sum
       120
@@ -192,7 +192,7 @@ defmodule ReactiveStruct do
   - Individual computation functions for each computed field
   - Dependency tracking and affected field calculation
   - Topological sorting for correct computation order
-  - Public API functions (`new/1`, `update/2`, `put/3`)
+  - Public API functions (`new/1`, `merge/2`, `put/3`)
   """
 
   @doc false
@@ -340,11 +340,11 @@ defmodule ReactiveStruct do
           end
         end
 
-        def update(struct, key, value) when is_atom(key) do
-          update(struct, [{key, value}])
+        def merge(struct, key, value) when is_atom(key) do
+          merge(struct, [{key, value}])
         end
 
-        def update(struct, attrs) when is_list(attrs) or is_map(attrs) do
+        def merge(struct, attrs) when is_list(attrs) or is_map(attrs) do
           attrs_list = normalize_attrs(attrs, as_list: true)
           changed_fields = Enum.map(attrs_list, &elem(&1, 0))
 
@@ -355,7 +355,7 @@ defmodule ReactiveStruct do
           |> recompute_dependencies(changed_fields)
         end
 
-        def put(struct, key, value), do: update(struct, key, value)
+        def put(struct, key, value), do: merge(struct, key, value)
 
         @doc """
         Generates a MermaidJS flowchart diagram showing field dependencies.

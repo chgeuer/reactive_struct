@@ -16,7 +16,7 @@ defmodule ReactiveStructTest do
     struct = TestStruct.new(%{x: 1, y: 2})
     assert struct.sum == 3
 
-    updated = TestStruct.update(struct, :x, 10)
+    updated = TestStruct.merge(struct, :x, 10)
     assert updated.sum == 12
   end
 
@@ -66,17 +66,17 @@ defmodule ReactiveStructTest do
     end
 
     # Updating input fields should work
-    updated = RestrictedStruct.update(struct, :x, 10)
+    updated = RestrictedStruct.merge(struct, :x, 10)
     assert updated.sum == 12
 
     # Updating computed fields should raise an error
     assert_raise ArgumentError, ~r/Cannot set computed fields :sum/, fn ->
-      RestrictedStruct.update(struct, :sum, 100)
+      RestrictedStruct.merge(struct, :sum, 100)
     end
 
     # Multiple field updates with computed field should also raise an error
     assert_raise ArgumentError, ~r/Cannot set computed fields :sum/, fn ->
-      RestrictedStruct.update(struct, %{x: 5, sum: 100})
+      RestrictedStruct.merge(struct, %{x: 5, sum: 100})
     end
   end
 
@@ -98,11 +98,11 @@ defmodule ReactiveStructTest do
     assert struct.sum == 100
 
     # Updating computed fields should also work
-    updated = AllowedStruct.update(struct, :sum, 200)
+    updated = AllowedStruct.merge(struct, :sum, 200)
     assert updated.sum == 200
 
     # Multiple field updates with computed field should also work
-    updated2 = AllowedStruct.update(struct, %{x: 5, sum: 50})
+    updated2 = AllowedStruct.merge(struct, %{x: 5, sum: 50})
     assert updated2.x == 5
     assert updated2.sum == 50
   end
@@ -122,7 +122,7 @@ defmodule ReactiveStructTest do
     struct = BackwardsCompatStruct.new(%{x: 1, y: 2, sum: 100})
     assert struct.sum == 100
 
-    updated = BackwardsCompatStruct.update(struct, :sum, 200)
+    updated = BackwardsCompatStruct.merge(struct, :sum, 200)
     assert updated.sum == 200
   end
 
