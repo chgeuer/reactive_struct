@@ -3,8 +3,7 @@
 ```elixir
 Mix.install([
   {:kino, "~> 0.17.0"},
-  # {:reactive_struct, github: "chgeuer/reactive_struct"}
-  {:reactive_struct, path: "/home/chgeuer/src/reactive_struct"}
+  {:reactive_struct, github: "chgeuer/reactive_struct"}
 ], force: true)
 ```
 
@@ -13,17 +12,15 @@ Mix.install([
 ```elixir
 defmodule Calculator do
   use ReactiveStruct, 
-    allow_updating_computed_fields: true
+    allow_updating_computed_fields: false
 
   defstruct ~w(a0 a b sum product)a
 
-  computed(:a, deps: [:a0], do: a0 + 1)
+  computed(:a, fn %{a0: a0} -> a0 + 1 end)
   
-  computed(:sum, deps: [:a, :b], do: a + b)
+  computed :sum, fn %{a: a, b: b} -> a + b end
   
-  computed :product, deps: [:a, :b] do
-    a * b
-  end
+  computed :product, fn %{a: a, b: b} -> a * b end
 end
 ```
 
@@ -35,9 +32,9 @@ Calculator.mermaid()
 ```elixir
 Calculator.new(a0: 2, b: 3)
 |> IO.inspect(label: :a)
-|> Calculator.update(a0: 5)
+|> Calculator.merge(a0: 5)
 |> IO.inspect(label: :b)  
-|> Calculator.update(product: 5)
+|> Calculator.merge(product: 5)
 |> IO.inspect(label: :c)  
 ```
 
@@ -47,19 +44,17 @@ defmodule Chain do
 
   defstruct ~w[base base2 step1 step2 final]a
 
-  computed(:step1, deps: 
-    [:base, :base2], do: base * 2 + base2)
-  computed(:step2, deps: [:step1], do: step1 + 10)
-  computed(:final, deps: [:step2], do: step2 * step2)
+  computed(:step1, fn %{base: a, base2: b} -> a * 2 + b end)
+  computed(:step2, fn %{step1: x} -> x + 10 end)
+  computed(:final, fn %{step2: x} -> x * x end)
 end
 
-Chain.new(base: 2)
+Chain.new(base: 2, base2: 3)
 
-# chain = %{final: 256} = Chain.new(base: 3)
-# chain = %{final: 400} = Chain.up
-# date(chain, base: 5)
+chain = %{final: 289} = Chain.new(base: 2, base2: 3)
+chain = %{final: 529} = Chain.merge(chain, base: 5)
 
-# Chain.update(chain, step2: 5)
+# Chain.merge(chain, step2: 5)
 
-# Kino.Mermaid.new(Chain.mermaid())
+Kino.Mermaid.new(Chain.mermaid())
 ```
