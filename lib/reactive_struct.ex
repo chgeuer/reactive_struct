@@ -205,8 +205,10 @@ defmodule ReactiveStruct do
     required_fields = Keyword.get(opts, :required_fields, [])
 
     quote do
-      import ReactiveStruct, only: [computed: 2, computed: 3]
+      import ReactiveStruct, only: [computed: 2, computed: 3, defstruct: 1]
+      import Kernel, except: [defstruct: 1]
       @reactive_computations []
+      @reactive_struct_fields []
       @allow_setting_computed_fields unquote(allow_setting_computed_fields)
       @required_fields unquote(required_fields)
       @before_compile ReactiveStruct
@@ -233,6 +235,47 @@ defmodule ReactiveStruct do
   defmacro computed(field, opts) do
     block = Keyword.get(opts, :do)
     add_computation(field, opts, block)
+  end
+
+  @doc false
+  defmacro defstruct(fields) do
+    # Extract field names at macro expansion time
+    field_names = extract_field_names_at_macro_time(fields)
+
+    quote do
+      # Store the struct fields for compile-time use
+      @reactive_struct_fields unquote(field_names)
+
+      # Call the original Kernel.defstruct
+      Kernel.defstruct(unquote(fields))
+    end
+  end
+
+  defp extract_field_names_at_macro_time(fields) when is_list(fields) do
+    Enum.map(fields, fn
+      {field, _default} -> field
+      field when is_atom(field) -> field
+      {:__aliases__, _, [field]} -> field
+    end)
+  end
+
+  # Handle special syntax like ~w[a b c]a
+  defp extract_field_names_at_macro_time({:sigil_w, _, [{:<<>>, _, [fields_string]}, ~c"a"]}) do
+    fields_string
+    |> String.split()
+    |> Enum.map(&String.to_atom/1)
+  end
+
+  defp extract_field_names_at_macro_time({:sigil_w, _, [fields_string, ~c"a"]})
+       when is_binary(fields_string) do
+    fields_string
+    |> String.split()
+    |> Enum.map(&String.to_atom/1)
+  end
+
+  defp extract_field_names_at_macro_time(_other) do
+    # For any other format, return empty and fall back to runtime
+    []
   end
 
   defp add_computation(field, opts, block) do
@@ -360,11 +403,9 @@ defmodule ReactiveStruct do
         end
 
         defp validate_attrs_with_schema(attrs) do
-          ReactiveStruct.validate_attrs_with_schema(
+          ReactiveStruct.validate_attrs_with_precomputed_schema(
             attrs,
-            @required_fields,
-            @computations,
-            __MODULE__
+            @validation_schema
           )
         end
       end
@@ -492,8 +533,8 @@ defmodule ReactiveStruct do
 
   @doc false
   def find_affected_computations(changed_fields, computations) do
-    changed_set = MapSet.new(changed_fields)
-    find_affected_computations_iterative(changed_set, computations, [])
+    MapSet.new(changed_fields)
+    |> find_affected_computations_iterative(computations, [])
   end
 
   @doc false
@@ -515,6 +556,19 @@ defmodule ReactiveStruct do
   @doc false
   def validate_attrs_with_schema(attrs, manual_required_fields, computations, module) do
     schema = build_schema_for_module(module, manual_required_fields, computations)
+    attrs_as_keyword = normalize_attrs_to_list(attrs)
+
+    case NimbleOptions.validate(attrs_as_keyword, schema) do
+      {:ok, validated_attrs} ->
+        Enum.into(validated_attrs, %{})
+
+      {:error, %NimbleOptions.ValidationError{} = error} ->
+        raise ArgumentError, "Invalid attributes: #{Exception.message(error)}"
+    end
+  end
+
+  @doc false
+  def validate_attrs_with_precomputed_schema(attrs, schema) do
     attrs_as_keyword = normalize_attrs_to_list(attrs)
 
     case NimbleOptions.validate(attrs_as_keyword, schema) do
@@ -557,25 +611,24 @@ defmodule ReactiveStruct do
 
   @doc false
   def recompute_all(struct, computations, module) do
-    computation_order = topological_sort(computations)
-
-    Enum.reduce(computation_order, struct, fn {field, deps, computation}, acc ->
-      recompute_field(acc, field, deps, computation, module)
+    computations
+    |> topological_sort()
+    |> Enum.reduce(struct, fn {field, deps, _computation}, acc ->
+      recompute_field(acc, field, deps, module)
     end)
   end
 
   @doc false
   def recompute_dependencies(struct, changed_fields, computations, module) do
-    affected_computations = find_affected_computations(changed_fields, computations)
-    computation_order = topological_sort(affected_computations)
-
-    Enum.reduce(computation_order, struct, fn {field, deps, computation}, acc ->
-      recompute_field(acc, field, deps, computation, module)
+    find_affected_computations(changed_fields, computations)
+    |> topological_sort()
+    |> Enum.reduce(struct, fn {field, deps, _computation}, acc ->
+      recompute_field(acc, field, deps, module)
     end)
   end
 
   @doc false
-  def recompute_field(struct, field, deps, _computation, module) do
+  def recompute_field(struct, field, deps, module) do
     function_name = String.to_atom("__compute_#{field}__")
     dep_values = Enum.map(deps, &Map.get(struct, &1))
     result = apply(module, function_name, dep_values)
@@ -585,16 +638,13 @@ defmodule ReactiveStruct do
   @doc false
   def recompute_missing_computed_fields(struct, explicitly_set_fields, computations, module) do
     # Only recompute computed fields that weren't explicitly set
-    computations_to_recompute =
-      computations
-      |> Enum.filter(fn {field, _deps, _computation} ->
-        not MapSet.member?(explicitly_set_fields, field)
-      end)
-
-    computation_order = topological_sort(computations_to_recompute)
-
-    Enum.reduce(computation_order, struct, fn {field, deps, computation}, acc ->
-      recompute_field(acc, field, deps, computation, module)
+    computations
+    |> Enum.filter(fn {field, _deps, _computation} ->
+      not MapSet.member?(explicitly_set_fields, field)
+    end)
+    |> topological_sort()
+    |> Enum.reduce(struct, fn {field, deps, _computation}, acc ->
+      recompute_field(acc, field, deps, module)
     end)
   end
 
@@ -692,15 +742,84 @@ defmodule ReactiveStruct do
   end
 
   @doc false
+  def get_struct_fields_at_compile_time(module) do
+    # Try to get struct fields from various module attributes
+    # The exact attribute name may vary depending on Elixir version
+    fields =
+      Module.get_attribute(module, :struct) ||
+        Module.get_attribute(module, :__struct__) ||
+        []
+
+    case fields do
+      fields when is_list(fields) ->
+        fields
+        |> Enum.reject(&(&1 == :__struct__))
+        |> Enum.map(fn
+          {field, _default} -> field
+          field when is_atom(field) -> field
+        end)
+
+      # Sometimes it's a map, in which case we fall back to runtime detection
+      %{} ->
+        []
+
+      _ ->
+        []
+    end
+  end
+
+  @doc false
+  def build_compile_time_schema(struct_fields, manual_required_fields, computations) do
+    # Automatically detect input fields (fields used as dependencies but not computed)
+    auto_required_fields = get_input_fields(computations, struct_fields)
+
+    # Combine manual and auto-detected required fields
+    all_required_fields =
+      MapSet.union(
+        MapSet.new(manual_required_fields),
+        auto_required_fields
+      )
+
+    struct_fields
+    |> Enum.map(fn field ->
+      options = [type: :any]
+
+      options =
+        if MapSet.member?(all_required_fields, field) do
+          [{:required, true} | options]
+        else
+          options
+        end
+
+      {field, options}
+    end)
+  end
+
+  @doc false
   defmacro __before_compile__(env) do
     computations = Module.get_attribute(env.module, :reactive_computations) |> Enum.reverse()
+    struct_fields = Module.get_attribute(env.module, :reactive_struct_fields) || []
+    required_fields = Module.get_attribute(env.module, :required_fields) || []
+
+    # Generate the schema at compile time
+    schema = build_compile_time_schema(struct_fields, required_fields, computations)
 
     quote do
       @computations unquote(Macro.escape(computations))
+      @validation_schema unquote(Macro.escape(schema))
 
       unquote_splicing(ReactiveStruct.generate_computation_functions(computations))
       unquote(ReactiveStruct.generate_api_functions())
       unquote(ReactiveStruct.generate_computation_helpers())
+
+      # Add a function to verify compile-time optimization
+      def __reactive_struct_info__ do
+        %{
+          schema_compiled_at_compile_time: true,
+          schema_size: length(@validation_schema),
+          computations_count: length(@computations)
+        }
+      end
     end
   end
 end
